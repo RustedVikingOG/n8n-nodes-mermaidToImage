@@ -1,0 +1,34 @@
+<svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background circle -->
+    <circle cx="30" cy="30" r="28" fill="#ff6b8a" stroke="#e55d7a" stroke-width="2"/>
+    
+    <!-- Diagram elements representing flowchart -->
+    <!-- Start node -->
+    <rect x="22" y="10" width="16" height="8" rx="4" fill="white" stroke="#333" stroke-width="1"/>
+    
+    <!-- Arrow down -->
+    <line x1="30" y1="18" x2="30" y2="25" stroke="#333" stroke-width="2"/>
+    <polygon points="28,23 30,27 32,23" fill="#333"/>
+    
+    <!-- Decision diamond -->
+    <polygon points="30,27 38,35 30,43 22,35" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="30" y="37" text-anchor="middle" font-family="Arial" font-size="8" fill="#333">?</text>
+    
+    <!-- Left arrow -->
+    <line x1="22" y1="35" x2="15" y2="35" stroke="#333" stroke-width="2"/>
+    <polygon points="17,33 13,35 17,37" fill="#333"/>
+    
+    <!-- Right arrow -->
+    <line x1="38" y1="35" x2="45" y2="35" stroke="#333" stroke-width="2"/>
+    <polygon points="43,33 47,35 43,37" fill="#333"/>
+    
+    <!-- Left end node -->
+    <rect x="7" y="31" width="8" height="8" rx="4" fill="white" stroke="#333" stroke-width="1"/>
+    
+    <!-- Right end node -->
+    <rect x="45" y="31" width="8" height="8" rx="4" fill="white" stroke="#333" stroke-width="1"/>
+    
+    <!-- PNG indicator in bottom right -->
+    <circle cx="48" cy="48" r="8" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="48" y="51" text-anchor="middle" font-family="Arial" font-size="6" font-weight="bold" fill="#333">PNG</text>
+</svg>

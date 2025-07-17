@@ -1,0 +1,14 @@
+{
+	"node": "n8n-nodes-starter.mermaidToPng",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Transform"],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://mermaid.js.org/"
+			}
+		]
+	},
+	"alias": ["mermaid", "diagram", "chart", "visualization"]
+}
