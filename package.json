@@ -50,6 +50,6 @@
   },
   "dependencies": {
     "mermaid": "11.9.0",
-    "puppeteer": "24.14.0"
+    "sharp": "^0.33.5"
   }
 }

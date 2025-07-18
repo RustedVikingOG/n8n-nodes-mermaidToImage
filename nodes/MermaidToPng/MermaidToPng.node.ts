@@ -5,21 +5,13 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeConnectionType, NodeOperationError, ApplicationError } from 'n8n-workflow';
-import * as puppeteer from 'puppeteer';
+import sharp from 'sharp';
+import mermaid from 'mermaid';
+import { Buffer } from 'buffer';
 
 // Security: Define allowed themes to prevent code injection
 const ALLOWED_THEMES = ['default', 'dark', 'forest', 'neutral'] as const;
 type AllowedTheme = typeof ALLOWED_THEMES[number];
-
-// Security: HTML entity encoding function to prevent XSS
-function escapeHtml(unsafe: string): string {
-	return unsafe
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
-}
 
 // Security: Validate and sanitize theme parameter
 function validateTheme(theme: string): AllowedTheme {
@@ -182,6 +174,46 @@ graph TD
 				},
 			},
 			{
+				displayName: 'PNG Quality',
+				name: 'pngQuality',
+				type: 'number',
+				default: 90,
+				description: 'PNG compression quality (1-100, higher = better quality, larger file)',
+				typeOptions: {
+					minValue: 1,
+					maxValue: 100,
+				},
+			},
+			{
+				displayName: 'DPI/Resolution',
+				name: 'dpi',
+				type: 'options',
+				default: 150,
+				description: 'Output resolution in DPI for print quality',
+				options: [
+					{ name: 'Web Quality (72 DPI)', value: 72 },
+					{ name: 'Standard Print (150 DPI)', value: 150 },
+					{ name: 'High Print (300 DPI)', value: 300 },
+					{ name: 'Custom', value: 'custom' },
+				],
+			},
+			{
+				displayName: 'Custom DPI',
+				name: 'customDpi',
+				type: 'number',
+				default: 150,
+				description: 'Custom DPI value when Custom is selected',
+				displayOptions: {
+					show: {
+						dpi: ['custom'],
+					},
+				},
+				typeOptions: {
+					minValue: 72,
+					maxValue: 600,
+				},
+			},
+			{
 				displayName: 'Rendering Timeout (Seconds)',
 				name: 'timeout',
 				type: 'number',
@@ -200,8 +232,6 @@ graph TD
 		const returnData: INodeExecutionData[] = [];
 
 		for (let i = 0; i < items.length; i++) {
-			let browser: puppeteer.Browser | null = null;
-
 			try {
 				const mermaidCode = this.getNodeParameter('mermaidCode', i) as string;
 				const theme = this.getNodeParameter('theme', i) as string;
@@ -209,7 +239,13 @@ graph TD
 				const width = this.getNodeParameter('width', i) as number;
 				const height = this.getNodeParameter('height', i) as number;
 				const scale = this.getNodeParameter('scale', i) as number;
+				const pngQuality = this.getNodeParameter('pngQuality', i) as number;
+				const dpiOption = this.getNodeParameter('dpi', i) as number | string;
+				const customDpi = this.getNodeParameter('customDpi', i) as number;
 				const timeout = this.getNodeParameter('timeout', i) as number;
+
+				// Calculate final DPI value
+				const dpiValue = dpiOption === 'custom' ? customDpi : (dpiOption as number);
 
 				// Security: Validate and sanitize inputs
 				validateMermaidInput(mermaidCode);
@@ -239,150 +275,85 @@ graph TD
 					);
 				}
 
-				// Security: Launch Puppeteer browser with improved security settings
-				// Note: --no-sandbox is used conditionally for containerized environments
-				// In production, consider removing this flag if possible
-				const isContainerized = process.env.NODE_ENV === 'production' || process.env.CONTAINER === 'true';
-				const browserArgs = isContainerized
-					? ['--no-sandbox', '--disable-setuid-sandbox'] // For containerized environments
-					: ['--disable-setuid-sandbox']; // More secure for non-containerized
-
-				browser = await puppeteer.launch({
-					headless: true,
-					args: browserArgs,
+				// Initialize Mermaid with theme configuration
+				mermaid.initialize({
+					theme: validatedTheme,
+					themeVariables: {
+						background: backgroundColor,
+						primaryColor: backgroundColor === 'transparent' ? '#ffffff' : backgroundColor
+					},
+					startOnLoad: false,
+					securityLevel: 'strict'
 				});
 
-				try {
-					const page = await browser.newPage();
+				// Generate SVG from Mermaid code
+				const diagramId = `mermaid-diagram-${i}-${Date.now()}`;
+				const { svg } = await mermaid.render(diagramId, cleanMermaidCode);
 
-					// Set viewport size
-					await page.setViewport({
-						width: Math.ceil(width * scale),
-						height: Math.ceil(height * scale),
-						deviceScaleFactor: scale,
-					});
-
-					// Security: Sanitize only CSS values, not Mermaid code content
-					const sanitizedBackgroundColor = escapeHtml(backgroundColor);
-
-					// Use local Mermaid library via page.evaluate to avoid external CDN
-					const html = `
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            background-color: ${sanitizedBackgroundColor};
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            font-family: Arial, sans-serif;
-        }
-        #diagram {
-            background-color: ${sanitizedBackgroundColor};
-        }
-    </style>
-</head>
-<body>
-    <div id="diagram">${cleanMermaidCode}</div>
-</body>
-</html>`;
-
-					await page.setContent(html);
-
-					// Use server-side Mermaid rendering to avoid external CDN dependency
-					const mermaidModule = await import('mermaid');
-					
-					// Configure Mermaid on the server side
-					mermaidModule.default.initialize({
-						theme: validatedTheme,
-						themeVariables: {
-							background: backgroundColor,
-							primaryColor: backgroundColor
-						}
-					});
-
-					// Render Mermaid diagram on server side and inject SVG
-					const { svg } = await mermaidModule.default.render('mermaid-diagram', cleanMermaidCode);
-					
-					// Inject the rendered SVG into the page
-					await page.evaluate(`
-						(function(svgContent, bgColor) {
-							const diagramDiv = document.getElementById('diagram');
-							if (diagramDiv) {
-								diagramDiv.innerHTML = arguments[0];
-								const svgElement = diagramDiv.querySelector('svg');
-								if (svgElement) {
-									svgElement.style.backgroundColor = arguments[1];
-								}
-							}
-						})('${svg.replace(/'/g, "\\'")}', '${backgroundColor}');
-					`);
-
-					// Wait a moment for the SVG to be fully rendered in the DOM
-					await page.waitForSelector('#diagram svg', { timeout: timeoutMs });
-
-					// Take screenshot of the diagram
-					const diagramElement = await page.$('#diagram svg');
-					if (!diagramElement) {
-						throw new NodeOperationError(
-							this.getNode(),
-							'Failed to render Mermaid diagram',
-							{ itemIndex: i },
-						);
-					}
-
-					const imageBuffer = await diagramElement.screenshot({
-						type: 'png',
-						omitBackground: backgroundColor === 'transparent',
-					});
-
-					// Create binary data for n8n
-					const binaryPropertyName = 'data';
-					const binaryData = await this.helpers.prepareBinaryData(
-						Buffer.from(imageBuffer),
-						`mermaid-diagram-${i}.png`,
-						'image/png',
+				if (!svg) {
+					throw new NodeOperationError(
+						this.getNode(),
+						'Failed to generate SVG from Mermaid diagram',
+						{ itemIndex: i },
 					);
+				}
 
-					returnData.push({
-						json: {
-							success: true,
-							filename: `mermaid-diagram-${i}.png`,
-							width: width,
-							height: height,
-							scale: scale,
-							theme: validatedTheme,
-							backgroundColor: backgroundColor,
-							renderingTimeoutUsed: timeoutMs / 1000,
-						},
-						binary: {
-							[binaryPropertyName]: binaryData,
-						},
+				// Configure Sharp for SVG to PNG conversion
+				const finalWidth = Math.ceil(width * scale);
+				const finalHeight = Math.ceil(height * scale);
+
+				// Create Sharp pipeline for SVG to PNG conversion
+				let sharpPipeline = sharp(Buffer.from(svg))
+					.resize(finalWidth, finalHeight, {
+						fit: 'contain',
+						background: backgroundColor === 'transparent' 
+							? { r: 0, g: 0, b: 0, alpha: 0 }
+							: backgroundColor
 					});
 
-				} finally {
-					// Security: Ensure browser cleanup even if page operations fail
-					if (browser) {
-						await browser.close();
-						browser = null;
-					}
-				}
+				// Configure PNG output with quality and DPI
+				const pngOptions: sharp.PngOptions = {
+					quality: Math.max(1, Math.min(100, pngQuality)),
+					compressionLevel: 6, // Balanced compression
+					palette: false, // Use full color depth
+				};
+
+				// Convert to PNG with metadata
+				const pngBuffer = await sharpPipeline
+					.png(pngOptions)
+					.withMetadata({
+						density: dpiValue
+					})
+					.toBuffer();
+
+				// Create binary data for n8n
+				const binaryPropertyName = 'data';
+				const binaryData = await this.helpers.prepareBinaryData(
+					pngBuffer,
+					`mermaid-diagram-${i}.png`,
+					'image/png',
+				);
+
+				returnData.push({
+					json: {
+						success: true,
+						filename: `mermaid-diagram-${i}.png`,
+						width: finalWidth,
+						height: finalHeight,
+						scale: scale,
+						theme: validatedTheme,
+						backgroundColor: backgroundColor,
+						pngQuality: pngQuality,
+						dpi: dpiValue,
+						renderingTimeoutUsed: timeoutMs / 1000,
+						conversionMethod: 'sharp',
+					},
+					binary: {
+						[binaryPropertyName]: binaryData,
+					},
+				});
 
 			} catch (error) {
-				// Security: Ensure browser cleanup in error scenarios
-				if (browser) {
-					try {
-						await browser.close();
-					} catch (cleanupError) {
-						// Log cleanup error but don't throw
-						console.warn('Browser cleanup error:', cleanupError);
-					}
-				}
-
 				if (this.continueOnFail()) {
 					returnData.push({
 						json: {
