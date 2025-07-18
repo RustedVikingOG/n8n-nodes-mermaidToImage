@@ -218,7 +218,7 @@ graph TD
 				name: 'timeout',
 				type: 'number',
 				default: 10,
-				description: 'Maximum time to wait for diagram rendering (3-60 seconds)',
+				description: 'Timeout setting for diagram rendering (configurable for future enhancement)',
 				typeOptions: {
 					minValue: 3,
 					maxValue: 60,
@@ -251,6 +251,10 @@ graph TD
 				validateMermaidInput(mermaidCode);
 				const validatedTheme = validateTheme(theme);
 				const timeoutMs = Math.max(3000, Math.min(60000, timeout * 1000)); // Ensure timeout is between 3-60 seconds
+
+				// Note: Timeout is validated and configured but not yet implemented in mermaid.render()
+				// The Mermaid library's render() method is typically fast and doesn't support timeout natively
+				// This parameter is available for future enhancement when timeout support is needed
 
 				// Extract mermaid code from markdown code blocks
 				const mermaidMatch = mermaidCode.match(/```mermaid\s*([\s\S]*?)\s*```/);
@@ -286,19 +290,18 @@ graph TD
 					securityLevel: 'strict'
 				});
 
-				// Generate SVG from Mermaid code
-				const diagramId = `mermaid-diagram-${i}-${Date.now()}`;
-				const { svg } = await mermaid.render(diagramId, cleanMermaidCode);
+			// Generate SVG from Mermaid code
+			// Note: Timeout parameter is available for future enhancement when needed
+			const diagramId = `mermaid-diagram-${i}-${Date.now()}`;
+			const { svg } = await mermaid.render(diagramId, cleanMermaidCode);
 
-				if (!svg) {
-					throw new NodeOperationError(
-						this.getNode(),
-						'Failed to generate SVG from Mermaid diagram',
-						{ itemIndex: i },
-					);
-				}
-
-				// Configure Sharp for SVG to PNG conversion
+			if (!svg) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Failed to generate SVG from Mermaid diagram',
+					{ itemIndex: i },
+				);
+			}				// Configure Sharp for SVG to PNG conversion
 				const finalWidth = Math.ceil(width * scale);
 				const finalHeight = Math.ceil(height * scale);
 
@@ -345,8 +348,8 @@ graph TD
 						backgroundColor: backgroundColor,
 						pngQuality: pngQuality,
 						dpi: dpiValue,
-						renderingTimeoutUsed: timeoutMs / 1000,
 						conversionMethod: 'sharp',
+						timeoutConfigured: timeoutMs / 1000, // Configured timeout (for future use)
 					},
 					binary: {
 						[binaryPropertyName]: binaryData,
