@@ -55,7 +55,7 @@ function validateMermaidInput(input: string): void {
 
 	// Check if input contains valid Mermaid diagram patterns
 	const containsValidMermaid = mermaidPatterns.some(pattern => pattern.test(input));
-	
+
 	if (!containsValidMermaid) {
 		// Check for basic node patterns as fallback
 		const hasBasicNodePattern = /[A-Za-z0-9_]+\s*[\-\>]+\s*[A-Za-z0-9_]+/.test(input);
@@ -306,7 +306,7 @@ graph TD
 				let sharpPipeline = sharp(Buffer.from(svg))
 					.resize(finalWidth, finalHeight, {
 						fit: 'contain',
-						background: backgroundColor === 'transparent' 
+						background: backgroundColor === 'transparent'
 							? { r: 0, g: 0, b: 0, alpha: 0 }
 							: backgroundColor
 					});
