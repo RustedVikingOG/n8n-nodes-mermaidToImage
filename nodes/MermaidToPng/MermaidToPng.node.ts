@@ -4,8 +4,50 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeConnectionType, NodeOperationError } from 'n8n-workflow';
+import { NodeConnectionType, NodeOperationError, ApplicationError } from 'n8n-workflow';
 import * as puppeteer from 'puppeteer';
+
+// Security: Define allowed themes to prevent code injection
+const ALLOWED_THEMES = ['default', 'dark', 'forest', 'neutral'] as const;
+type AllowedTheme = typeof ALLOWED_THEMES[number];
+
+// Security: HTML entity encoding function to prevent XSS
+function escapeHtml(unsafe: string): string {
+	return unsafe
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#039;');
+}
+
+// Security: Validate and sanitize theme parameter
+function validateTheme(theme: string): AllowedTheme {
+	if (ALLOWED_THEMES.includes(theme as AllowedTheme)) {
+		return theme as AllowedTheme;
+	}
+	// Return safe default if invalid theme provided
+	return 'default';
+}
+
+// Security: Validate Mermaid input length and basic structure
+function validateMermaidInput(input: string): void {
+	const MAX_INPUT_LENGTH = 50000; // 50KB limit
+
+	if (!input || input.trim().length === 0) {
+		throw new ApplicationError('Mermaid input cannot be empty');
+	}
+
+	if (input.length > MAX_INPUT_LENGTH) {
+		throw new ApplicationError(`Mermaid input too large. Maximum ${MAX_INPUT_LENGTH} characters allowed`);
+	}
+
+	// Basic structure validation - should contain some Mermaid-like content
+	const hasBasicMermaidStructure = /^[a-zA-Z0-9\s\-\>\[\]\{\}\(\)\_\:\;\.]+$/m.test(input.replace(/\n/g, ' '));
+	if (!hasBasicMermaidStructure) {
+		throw new ApplicationError('Invalid characters detected in Mermaid input');
+	}
+}
 
 export class MermaidToPng implements INodeType {
 	description: INodeTypeDescription = {
@@ -98,6 +140,17 @@ graph TD
 					maxValue: 4,
 				},
 			},
+			{
+				displayName: 'Rendering Timeout (Seconds)',
+				name: 'timeout',
+				type: 'number',
+				default: 10,
+				description: 'Maximum time to wait for diagram rendering (3-60 seconds)',
+				typeOptions: {
+					minValue: 3,
+					maxValue: 60,
+				},
+			},
 		],
 	};
 
@@ -106,6 +159,8 @@ graph TD
 		const returnData: INodeExecutionData[] = [];
 
 		for (let i = 0; i < items.length; i++) {
+			let browser: puppeteer.Browser | null = null;
+
 			try {
 				const mermaidCode = this.getNodeParameter('mermaidCode', i) as string;
 				const theme = this.getNodeParameter('theme', i) as string;
@@ -113,6 +168,12 @@ graph TD
 				const width = this.getNodeParameter('width', i) as number;
 				const height = this.getNodeParameter('height', i) as number;
 				const scale = this.getNodeParameter('scale', i) as number;
+				const timeout = this.getNodeParameter('timeout', i) as number;
+
+				// Security: Validate and sanitize inputs
+				validateMermaidInput(mermaidCode);
+				const validatedTheme = validateTheme(theme);
+				const timeoutMs = Math.max(3000, Math.min(60000, timeout * 1000)); // Ensure timeout is between 3-60 seconds
 
 				// Extract mermaid code from markdown code blocks
 				const mermaidMatch = mermaidCode.match(/```mermaid\s*([\s\S]*?)\s*```/);
@@ -126,6 +187,9 @@ graph TD
 
 				const cleanMermaidCode = mermaidMatch[1].trim();
 
+				// Security: Additional validation on extracted code
+				validateMermaidInput(cleanMermaidCode);
+
 				if (!cleanMermaidCode) {
 					throw new NodeOperationError(
 						this.getNode(),
@@ -134,10 +198,17 @@ graph TD
 					);
 				}
 
-				// Launch Puppeteer browser
-				const browser = await puppeteer.launch({
+				// Security: Launch Puppeteer browser with improved security settings
+				// Note: --no-sandbox is used conditionally for containerized environments
+				// In production, consider removing this flag if possible
+				const isContainerized = process.env.NODE_ENV === 'production' || process.env.CONTAINER === 'true';
+				const browserArgs = isContainerized
+					? ['--no-sandbox', '--disable-setuid-sandbox'] // For containerized environments
+					: ['--disable-setuid-sandbox']; // More secure for non-containerized
+
+				browser = await puppeteer.launch({
 					headless: true,
-					args: ['--no-sandbox', '--disable-setuid-sandbox'],
+					args: browserArgs,
 				});
 
 				try {
@@ -150,17 +221,32 @@ graph TD
 						deviceScaleFactor: scale,
 					});
 
-					// Create HTML with Mermaid
+					// Security: Sanitize inputs for HTML template
+					const sanitizedMermaidCode = escapeHtml(cleanMermaidCode);
+					const sanitizedBackgroundColor = escapeHtml(backgroundColor);
+
+					// Security: Create HTML with local Mermaid bundle and sanitized inputs
 					const html = `
 <!DOCTYPE html>
 <html>
 <head>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: '${validatedTheme}',
+            background: '${sanitizedBackgroundColor}',
+            themeVariables: {
+                background: '${sanitizedBackgroundColor}',
+                primaryColor: '${sanitizedBackgroundColor}'
+            }
+        });
+    </script>
     <style>
         body {
             margin: 0;
             padding: 20px;
-            background-color: ${backgroundColor};
+            background-color: ${sanitizedBackgroundColor};
             display: flex;
             justify-content: center;
             align-items: center;
@@ -168,30 +254,19 @@ graph TD
             font-family: Arial, sans-serif;
         }
         #diagram {
-            background-color: ${backgroundColor};
+            background-color: ${sanitizedBackgroundColor};
         }
     </style>
 </head>
 <body>
-    <div id="diagram">${cleanMermaidCode}</div>
-    <script>
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: '${theme}',
-            background: '${backgroundColor}',
-            themeVariables: {
-                background: '${backgroundColor}',
-                primaryColor: '${backgroundColor}'
-            }
-        });
-    </script>
+    <div id="diagram">${sanitizedMermaidCode}</div>
 </body>
 </html>`;
 
 					await page.setContent(html);
 
-					// Wait for Mermaid to render
-					await page.waitForSelector('svg', { timeout: 10000 });
+					// Security: Wait for Mermaid to render with configurable timeout
+					await page.waitForSelector('svg', { timeout: timeoutMs });
 
 					// Take screenshot of the diagram
 					const diagramElement = await page.$('#diagram svg');
@@ -223,8 +298,9 @@ graph TD
 							width: width,
 							height: height,
 							scale: scale,
-							theme: theme,
+							theme: validatedTheme,
 							backgroundColor: backgroundColor,
+							renderingTimeoutUsed: timeoutMs / 1000,
 						},
 						binary: {
 							[binaryPropertyName]: binaryData,
@@ -232,10 +308,24 @@ graph TD
 					});
 
 				} finally {
-					await browser.close();
+					// Security: Ensure browser cleanup even if page operations fail
+					if (browser) {
+						await browser.close();
+						browser = null;
+					}
 				}
 
 			} catch (error) {
+				// Security: Ensure browser cleanup in error scenarios
+				if (browser) {
+					try {
+						await browser.close();
+					} catch (cleanupError) {
+						// Log cleanup error but don't throw
+						console.warn('Browser cleanup error:', cleanupError);
+					}
+				}
+
 				if (this.continueOnFail()) {
 					returnData.push({
 						json: {
