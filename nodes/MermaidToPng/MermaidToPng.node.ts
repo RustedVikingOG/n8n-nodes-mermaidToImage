@@ -30,7 +30,7 @@ function validateTheme(theme: string): AllowedTheme {
 	return 'default';
 }
 
-// Security: Validate Mermaid input length and basic structure
+// Security: Validate Mermaid input length and structure (improved validation)
 function validateMermaidInput(input: string): void {
 	const MAX_INPUT_LENGTH = 50000; // 50KB limit
 
@@ -42,10 +42,51 @@ function validateMermaidInput(input: string): void {
 		throw new ApplicationError(`Mermaid input too large. Maximum ${MAX_INPUT_LENGTH} characters allowed`);
 	}
 
-	// Basic structure validation - should contain some Mermaid-like content
-	const hasBasicMermaidStructure = /^[a-zA-Z0-9\s\-\>\[\]\{\}\(\)\_\:\;\.]+$/m.test(input.replace(/\n/g, ' '));
-	if (!hasBasicMermaidStructure) {
-		throw new ApplicationError('Invalid characters detected in Mermaid input');
+	// Improved validation: Check for common Mermaid diagram types and dangerous patterns
+	const mermaidPatterns = [
+		/^graph\s+(TD|LR|TB|RL|BT)/m,           // Flowchart diagrams
+		/^sequenceDiagram/m,                     // Sequence diagrams
+		/^classDiagram/m,                        // Class diagrams
+		/^stateDiagram(-v2)?/m,                  // State diagrams
+		/^erDiagram/m,                           // Entity relationship diagrams
+		/^gantt/m,                               // Gantt charts
+		/^pie\s+title/m,                         // Pie charts
+		/^journey/m,                             // User journey diagrams
+		/^gitgraph/m,                            // Git graph diagrams
+		/^flowchart\s+(TD|LR|TB|RL|BT)/m,       // Flowchart with explicit keyword
+		/^timeline/m,                            // Timeline diagrams
+		/^mindmap/m,                             // Mind maps
+		/^block-beta/m,                          // Block diagrams
+		/^C4Context/m,                           // C4 diagrams
+		/^\s*[A-Za-z0-9_]+[\s\-\>]+/m,          // Basic node connections
+	];
+
+	// Check if input contains valid Mermaid diagram patterns
+	const containsValidMermaid = mermaidPatterns.some(pattern => pattern.test(input));
+	
+	if (!containsValidMermaid) {
+		// Check for basic node patterns as fallback
+		const hasBasicNodePattern = /[A-Za-z0-9_]+\s*[\-\>]+\s*[A-Za-z0-9_]+/.test(input);
+		if (!hasBasicNodePattern) {
+			throw new ApplicationError('Input does not appear to contain valid Mermaid diagram syntax');
+		}
+	}
+
+	// Security: Check for potentially dangerous patterns (script injection attempts)
+	const dangerousPatterns = [
+		/<script/i,
+		/javascript:/i,
+		/on[a-z]+\s*=/i,
+		/eval\s*\(/i,
+		/function\s*\(/i,
+		/<iframe/i,
+		/<object/i,
+		/<embed/i,
+	];
+
+	const containsDangerousPattern = dangerousPatterns.some(pattern => pattern.test(input));
+	if (containsDangerousPattern) {
+		throw new ApplicationError('Input contains potentially dangerous content');
 	}
 }
 
@@ -221,27 +262,14 @@ graph TD
 						deviceScaleFactor: scale,
 					});
 
-					// Security: Sanitize inputs for HTML template
-					const sanitizedMermaidCode = escapeHtml(cleanMermaidCode);
+					// Security: Sanitize only CSS values, not Mermaid code content
 					const sanitizedBackgroundColor = escapeHtml(backgroundColor);
 
-					// Security: Create HTML with local Mermaid bundle and sanitized inputs
+					// Use local Mermaid library via page.evaluate to avoid external CDN
 					const html = `
 <!DOCTYPE html>
 <html>
 <head>
-    <script type="module">
-        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: '${validatedTheme}',
-            background: '${sanitizedBackgroundColor}',
-            themeVariables: {
-                background: '${sanitizedBackgroundColor}',
-                primaryColor: '${sanitizedBackgroundColor}'
-            }
-        });
-    </script>
     <style>
         body {
             margin: 0;
@@ -259,14 +287,43 @@ graph TD
     </style>
 </head>
 <body>
-    <div id="diagram">${sanitizedMermaidCode}</div>
+    <div id="diagram">${cleanMermaidCode}</div>
 </body>
 </html>`;
 
 					await page.setContent(html);
 
-					// Security: Wait for Mermaid to render with configurable timeout
-					await page.waitForSelector('svg', { timeout: timeoutMs });
+					// Use server-side Mermaid rendering to avoid external CDN dependency
+					const mermaidModule = await import('mermaid');
+					
+					// Configure Mermaid on the server side
+					mermaidModule.default.initialize({
+						theme: validatedTheme,
+						themeVariables: {
+							background: backgroundColor,
+							primaryColor: backgroundColor
+						}
+					});
+
+					// Render Mermaid diagram on server side and inject SVG
+					const { svg } = await mermaidModule.default.render('mermaid-diagram', cleanMermaidCode);
+					
+					// Inject the rendered SVG into the page
+					await page.evaluate(`
+						(function(svgContent, bgColor) {
+							const diagramDiv = document.getElementById('diagram');
+							if (diagramDiv) {
+								diagramDiv.innerHTML = arguments[0];
+								const svgElement = diagramDiv.querySelector('svg');
+								if (svgElement) {
+									svgElement.style.backgroundColor = arguments[1];
+								}
+							}
+						})('${svg.replace(/'/g, "\\'")}', '${backgroundColor}');
+					`);
+
+					// Wait a moment for the SVG to be fully rendered in the DOM
+					await page.waitForSelector('#diagram svg', { timeout: timeoutMs });
 
 					// Take screenshot of the diagram
 					const diagramElement = await page.$('#diagram svg');
