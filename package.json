@@ -1,19 +1,19 @@
 {
-  "name": "n8n-nodes-<...>",
-  "version": "0.1.0",
-  "description": "",
+  "name": "n8n-nodes-mermaid_to_image",
+  "version": "1.0.0",
+  "description": "n8n community node for converting Mermaid diagrams to PNG images",
   "keywords": [
     "n8n-community-node-package"
   ],
   "license": "MIT",
   "homepage": "",
   "author": {
-    "name": "",
-    "email": ""
+    "name": "Wikus Bergh",
+    "email": "vikingsearth@gmail.com"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/<...>/n8n-nodes-<...>.git"
+    "url": "https://github.com/RustedVikingOG/n8n-nodes-mermaidToImage.git"
   },
   "engines": {
     "node": ">=20.15"

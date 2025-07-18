@@ -142,7 +142,7 @@ graph TD
 
 				try {
 					const page = await browser.newPage();
-					
+
 					// Set viewport size
 					await page.setViewport({
 						width: Math.ceil(width * scale),
@@ -175,8 +175,8 @@ graph TD
 <body>
     <div id="diagram">${cleanMermaidCode}</div>
     <script>
-        mermaid.initialize({ 
-            startOnLoad: true, 
+        mermaid.initialize({
+            startOnLoad: true,
             theme: '${theme}',
             background: '${backgroundColor}',
             themeVariables: {
@@ -189,10 +189,10 @@ graph TD
 </html>`;
 
 					await page.setContent(html);
-					
+
 					// Wait for Mermaid to render
 					await page.waitForSelector('svg', { timeout: 10000 });
-					
+
 					// Take screenshot of the diagram
 					const diagramElement = await page.$('#diagram svg');
 					if (!diagramElement) {
